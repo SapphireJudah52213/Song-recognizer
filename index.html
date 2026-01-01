@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Happy Birthday Recognizer</title>
+<title>Music Recognizer</title>
 
 <style>
 body {
@@ -13,29 +13,22 @@ body {
     color: white;
     text-align: center;
 }
-
-h1 {
-    margin-top: 20px;
-}
-
+h1 { margin-top: 20px; }
 button {
     padding: 12px 22px;
     font-size: 18px;
     margin: 10px;
 }
-
 #status {
     font-size: 20px;
     margin: 15px;
 }
-
 canvas {
     display: block;
     margin: 10px auto;
     background: #111;
     border-radius: 8px;
 }
-
 #meter {
     width: 80%;
     height: 15px;
@@ -44,26 +37,10 @@ canvas {
     border-radius: 10px;
     overflow: hidden;
 }
-
 #meterFill {
     height: 100%;
     width: 0%;
     background: lime;
-}
-
-.confetti {
-    position: fixed;
-    width: 8px;
-    height: 8px;
-    background: red;
-    top: -10px;
-    animation: fall 3s linear infinite;
-}
-
-@keyframes fall {
-    to {
-        transform: translateY(110vh) rotate(360deg);
-    }
 }
 </style>
 </head>
@@ -71,28 +48,38 @@ canvas {
 <body>
 
 <h1>Music Recognizer</h1>
-<p>Sing or play <strong>Happy Birthday</strong></p>
+<p>Detects <strong>Happy Birthday</strong> or <strong>Indiscretions – Brand X</strong></p>
 
 <button onclick="start()">Start Listening</button>
 <div id="status">Idle</div>
 
 <div id="meter"><div id="meterFill"></div></div>
-<canvas id="graph" width="300" height="120"></canvas>
+<canvas id="graph" width="320" height="130"></canvas>
 
 <script>
 let audioCtx, analyser, mic;
 let buffer = new Float32Array(2048);
 let pitches = [];
-let recognized = false;
+let locked = false;
 
 const canvas = document.getElementById("graph");
 const ctx = canvas.getContext("2d");
 
+/* === SONG SIGNATURES === */
+
+/* Happy Birthday – absolute pitch tolerance */
 const HAPPY = [
   264,264,297,264,352,330,
   264,264,297,264,396,352,
   264,264,528,440,352,330,297,
   466,466,440,352,396,352
+];
+
+/* Indiscretions – Brand X
+   Relative pitch contour (ratios)
+   Captures the opening riff movement */
+const BRANDX = [
+  1.00, 1.18, 0.92, 1.34, 1.12, 0.88, 1.26
 ];
 
 function start() {
@@ -103,7 +90,7 @@ function start() {
         mic = audioCtx.createMediaStreamSource(stream);
         mic.connect(analyser);
         pitches = [];
-        recognized = false;
+        locked = false;
         document.getElementById("status").textContent = "Listening…";
         loop();
     });
@@ -112,38 +99,38 @@ function start() {
 function loop() {
     analyser.getFloatTimeDomainData(buffer);
     let pitch = detectPitch(buffer, audioCtx.sampleRate);
-    let volume = rms(buffer);
+    let vol = rms(buffer);
 
     document.getElementById("meterFill").style.width =
-        Math.min(volume * 300, 100) + "%";
+        Math.min(vol * 300, 100) + "%";
 
     if (pitch > 0) {
         pitches.push(pitch);
         draw(pitch);
-        if (pitches.length > 250 && !recognized) check();
+        if (pitches.length > 260 && !locked) analyze();
     }
 
     requestAnimationFrame(loop);
 }
 
 function rms(buf) {
-    let sum = 0;
-    for (let i of buf) sum += i * i;
-    return Math.sqrt(sum / buf.length);
+    let s = 0;
+    for (let i of buf) s += i*i;
+    return Math.sqrt(s / buf.length);
 }
 
 function detectPitch(buf, rate) {
-    let best = 0, bestOffset = -1;
+    let best = 0, offset = -1;
     for (let o = 20; o < 1000; o++) {
-        let corr = 0;
+        let c = 0;
         for (let i = 0; i < buf.length - o; i++)
-            corr += buf[i] * buf[i + o];
-        if (corr > best) {
-            best = corr;
-            bestOffset = o;
+            c += buf[i] * buf[i + o];
+        if (c > best) {
+            best = c;
+            offset = o;
         }
     }
-    return bestOffset > 0 ? rate / bestOffset : -1;
+    return offset > 0 ? rate / offset : -1;
 }
 
 function draw(freq) {
@@ -154,31 +141,44 @@ function draw(freq) {
     ctx.fillRect(pitches.length % canvas.width, y, 2, 2);
 }
 
-function check() {
-    let matches = 0;
-    for (let t of HAPPY) {
-        if (pitches.find(p => Math.abs(p - t) < 15)) matches++;
-    }
-    if (matches > HAPPY.length * 0.6) {
-        recognized = true;
+function analyze() {
+    let hb = matchHappy();
+    let bx = matchBrandX();
+
+    if (hb > 0.6) {
+        locked = true;
         document.getElementById("status").textContent =
-            "Happy Birthday Recognized!";
-        confetti();
-    } else {
+            "Detected: Happy Birthday";
+    }
+    else if (bx > 0.55) {
+        locked = true;
+        document.getElementById("status").textContent =
+            "Detected: Indiscretions – Brand X";
+    }
+    else {
         pitches = [];
     }
 }
 
-function confetti() {
-    for (let i = 0; i < 120; i++) {
-        let c = document.createElement("div");
-        c.className = "confetti";
-        c.style.left = Math.random() * 100 + "vw";
-        c.style.background =
-            `hsl(${Math.random()*360},100%,50%)`;
-        document.body.appendChild(c);
-        setTimeout(()=>c.remove(),3000);
+function matchHappy() {
+    let hits = 0;
+    for (let n of HAPPY) {
+        if (pitches.find(p => Math.abs(p - n) < 15)) hits++;
     }
+    return hits / HAPPY.length;
+}
+
+function matchBrandX() {
+    let ratios = [];
+    for (let i = 1; i < pitches.length; i++) {
+        ratios.push(pitches[i] / pitches[i-1]);
+    }
+
+    let score = 0;
+    for (let r of BRANDX) {
+        if (ratios.find(x => Math.abs(x - r) < 0.08)) score++;
+    }
+    return score / BRANDX.length;
 }
 </script>
 
