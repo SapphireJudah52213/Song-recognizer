@@ -3,182 +3,100 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Music Recognizer</title>
-
+<title>Multi-Song Recognizer</title>
 <style>
-body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background: #0d1117;
-    color: white;
-    text-align: center;
-}
-h1 { margin-top: 20px; }
-button {
-    padding: 12px 22px;
-    font-size: 18px;
-    margin: 10px;
-}
-#status {
-    font-size: 20px;
-    margin: 15px;
-}
-canvas {
-    display: block;
-    margin: 10px auto;
-    background: #111;
-    border-radius: 8px;
-}
-#meter {
-    width: 80%;
-    height: 15px;
-    background: #333;
-    margin: auto;
-    border-radius: 10px;
-    overflow: hidden;
-}
-#meterFill {
-    height: 100%;
-    width: 0%;
-    background: lime;
-}
+body { margin:0; font-family:Arial,sans-serif; background:#0d1117; color:white; text-align:center; }
+button{ padding:12px; font-size:18px; margin:10px; }
+#status{ font-size:20px; margin:15px; }
+canvas{ display:block; margin:10px auto; background:#111; border-radius:8px; }
+#meter{ width:80%; height:15px; background:#333; margin:auto; border-radius:10px; overflow:hidden; }
+#meterFill{height:100%; width:0%; background:lime;}
 </style>
 </head>
-
 <body>
 
-<h1>Music Recognizer</h1>
-<p>Detects <strong>Happy Birthday</strong> or <strong>Indiscretions – Brand X</strong></p>
+<h1>Multi-Song Recognizer</h1>
+<p>Sing/play Lindsey Stirling radio songs</p>
 
-<button onclick="start()">Start Listening</button>
+<button onclick="start()">Start</button>
 <div id="status">Idle</div>
-
 <div id="meter"><div id="meterFill"></div></div>
 <canvas id="graph" width="320" height="130"></canvas>
 
 <script>
-let audioCtx, analyser, mic;
-let buffer = new Float32Array(2048);
-let pitches = [];
-let locked = false;
+let audioCtx, analyser, buffer = new Float32Array(2048);
+let pitches = [], locked=false;
+const canvas=document.getElementById("graph"),ctx=canvas.getContext("2d");
 
-const canvas = document.getElementById("graph");
-const ctx = canvas.getContext("2d");
-
-/* === SONG SIGNATURES === */
-
-/* Happy Birthday – absolute pitch tolerance */
-const HAPPY = [
-  264,264,297,264,352,330,
-  264,264,297,264,396,352,
-  264,264,528,440,352,330,297,
-  466,466,440,352,396,352
-];
-
-/* Indiscretions – Brand X
-   Relative pitch contour (ratios)
-   Captures the opening riff movement */
-const BRANDX = [
-  1.00, 1.18, 0.92, 1.34, 1.12, 0.88, 1.26
+// Song signature definitions (simple pitch motifs)
+const SONGS = [
+  { name:"Happy Birthday", pattern:[264,264,297,264,352,330] },
+  { name:"Crystallize", pattern:[264,297,330,352,396] },       // example motif
+  { name:"Shatter Me", pattern:[330,352,396,352,330] },
+  { name:"The Arena", pattern:[297,352,396,440,466] },
+  { name:"Something Wild", pattern:[264,297,352,396,440] },
+  { name:"Beyond the Veil", pattern:[352,396,440,396,352] },
+  { name:"Elements", pattern:[264,330,396,466,528] },
+  { name:"Hold My Heart", pattern:[297,352,440,352,297] },
+  { name:"Roundtable Rival", pattern:[264,297,330,352,396] }
 ];
 
 function start() {
-    navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
-        audioCtx = new AudioContext();
-        analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 2048;
-        mic = audioCtx.createMediaStreamSource(stream);
-        mic.connect(analyser);
-        pitches = [];
-        locked = false;
-        document.getElementById("status").textContent = "Listening…";
-        loop();
-    });
+  navigator.mediaDevices.getUserMedia({audio:true})
+  .then(stream=>{
+    audioCtx=new AudioContext();
+    analyser=audioCtx.createAnalyser();
+    analyser.fftSize=2048;
+    analyser.createMediaStreamSource(stream).connect(analyser);
+    pitches=[]; locked=false;
+    document.getElementById("status").textContent="Listening…";
+    loop();
+  });
 }
 
-function loop() {
-    analyser.getFloatTimeDomainData(buffer);
-    let pitch = detectPitch(buffer, audioCtx.sampleRate);
-    let vol = rms(buffer);
-
-    document.getElementById("meterFill").style.width =
-        Math.min(vol * 300, 100) + "%";
-
-    if (pitch > 0) {
-        pitches.push(pitch);
-        draw(pitch);
-        if (pitches.length > 260 && !locked) analyze();
-    }
-
-    requestAnimationFrame(loop);
+function loop(){
+  analyser.getFloatTimeDomainData(buffer);
+  let freq = detectPitch(buffer,audioCtx.sampleRate);
+  let vol = rms(buffer);
+  document.getElementById("meterFill").style.width=Math.min(vol*300,100)+"%";
+  if(freq>0){ pitches.push(freq); draw(freq); if(pitches.length>250 && !locked) analyze(); }
+  requestAnimationFrame(loop);
 }
 
-function rms(buf) {
-    let s = 0;
-    for (let i of buf) s += i*i;
-    return Math.sqrt(s / buf.length);
+function rms(buf){ let s=0;for(let i of buf)s+=i*i; return Math.sqrt(s/buf.length); }
+
+function detectPitch(buf,rate){
+  let best=0,off=-1;
+  for(let o=20;o<1000;o++){
+    let corr=0;
+    for(let i=0;i<buf.length-o;i++)corr+=buf[i]*buf[i+o];
+    if(corr>best){best=corr;off=o;}
+  }
+  return off>0?rate/off:-1;
 }
 
-function detectPitch(buf, rate) {
-    let best = 0, offset = -1;
-    for (let o = 20; o < 1000; o++) {
-        let c = 0;
-        for (let i = 0; i < buf.length - o; i++)
-            c += buf[i] * buf[i + o];
-        if (c > best) {
-            best = c;
-            offset = o;
-        }
-    }
-    return offset > 0 ? rate / offset : -1;
+function draw(freq){
+  ctx.fillStyle="#111";ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="cyan";let y=canvas.height-Math.min(freq/5,canvas.height);
+  ctx.fillRect(pitches.length%canvas.width,y,2,2);
 }
 
-function draw(freq) {
-    ctx.fillStyle = "#111";
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.fillStyle = "cyan";
-    let y = canvas.height - Math.min(freq / 5, canvas.height);
-    ctx.fillRect(pitches.length % canvas.width, y, 2, 2);
-}
-
-function analyze() {
-    let hb = matchHappy();
-    let bx = matchBrandX();
-
-    if (hb > 0.6) {
-        locked = true;
-        document.getElementById("status").textContent =
-            "Detected: Happy Birthday";
-    }
-    else if (bx > 0.55) {
-        locked = true;
-        document.getElementById("status").textContent =
-            "Detected: Indiscretions – Brand X";
-    }
-    else {
-        pitches = [];
-    }
-}
-
-function matchHappy() {
-    let hits = 0;
-    for (let n of HAPPY) {
-        if (pitches.find(p => Math.abs(p - n) < 15)) hits++;
-    }
-    return hits / HAPPY.length;
-}
-
-function matchBrandX() {
-    let ratios = [];
-    for (let i = 1; i < pitches.length; i++) {
-        ratios.push(pitches[i] / pitches[i-1]);
-    }
-
-    let score = 0;
-    for (let r of BRANDX) {
-        if (ratios.find(x => Math.abs(x - r) < 0.08)) score++;
-    }
-    return score / BRANDX.length;
+function analyze(){
+  let results=[];
+  for(let s of SONGS){
+    let hits=0;
+    for(let n of s.pattern)
+      if(pitches.find(p=>Math.abs(p-n)<15))hits++;
+    results.push({song:s.name,score: hits/s.pattern.length});
+  }
+  results.sort((a,b)=>b.score-a.score);
+  let best=results[0];
+  if(best.score>0.5){
+    locked=true;
+    document.getElementById("status").textContent = "Detected: "+best.song;
+  } else {
+    pitches=[];
+  }
 }
 </script>
 
