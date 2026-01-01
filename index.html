@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Happy Birthday Recognizer</title>
+
+<style>
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #0d1117;
+    color: white;
+    text-align: center;
+}
+
+h1 {
+    margin-top: 20px;
+}
+
+button {
+    padding: 12px 22px;
+    font-size: 18px;
+    margin: 10px;
+}
+
+#status {
+    font-size: 20px;
+    margin: 15px;
+}
+
+canvas {
+    display: block;
+    margin: 10px auto;
+    background: #111;
+    border-radius: 8px;
+}
+
+#meter {
+    width: 80%;
+    height: 15px;
+    background: #333;
+    margin: auto;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+#meterFill {
+    height: 100%;
+    width: 0%;
+    background: lime;
+}
+
+.confetti {
+    position: fixed;
+    width: 8px;
+    height: 8px;
+    background: red;
+    top: -10px;
+    animation: fall 3s linear infinite;
+}
+
+@keyframes fall {
+    to {
+        transform: translateY(110vh) rotate(360deg);
+    }
+}
+</style>
+</head>
+
+<body>
+
+<h1>Music Recognizer</h1>
+<p>Sing or play <strong>Happy Birthday</strong></p>
+
+<button onclick="start()">Start Listening</button>
+<div id="status">Idle</div>
+
+<div id="meter"><div id="meterFill"></div></div>
+<canvas id="graph" width="300" height="120"></canvas>
+
+<script>
+let audioCtx, analyser, mic;
+let buffer = new Float32Array(2048);
+let pitches = [];
+let recognized = false;
+
+const canvas = document.getElementById("graph");
+const ctx = canvas.getContext("2d");
+
+const HAPPY = [
+  264,264,297,264,352,330,
+  264,264,297,264,396,352,
+  264,264,528,440,352,330,297,
+  466,466,440,352,396,352
+];
+
+function start() {
+    navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+        audioCtx = new AudioContext();
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        mic = audioCtx.createMediaStreamSource(stream);
+        mic.connect(analyser);
+        pitches = [];
+        recognized = false;
+        document.getElementById("status").textContent = "Listening…";
+        loop();
+    });
+}
+
+function loop() {
+    analyser.getFloatTimeDomainData(buffer);
+    let pitch = detectPitch(buffer, audioCtx.sampleRate);
+    let volume = rms(buffer);
+
+    document.getElementById("meterFill").style.width =
+        Math.min(volume * 300, 100) + "%";
+
+    if (pitch > 0) {
+        pitches.push(pitch);
+        draw(pitch);
+        if (pitches.length > 250 && !recognized) check();
+    }
+
+    requestAnimationFrame(loop);
+}
+
+function rms(buf) {
+    let sum = 0;
+    for (let i of buf) sum += i * i;
+    return Math.sqrt(sum / buf.length);
+}
+
+function detectPitch(buf, rate) {
+    let best = 0, bestOffset = -1;
+    for (let o = 20; o < 1000; o++) {
+        let corr = 0;
+        for (let i = 0; i < buf.length - o; i++)
+            corr += buf[i] * buf[i + o];
+        if (corr > best) {
+            best = corr;
+            bestOffset = o;
+        }
+    }
+    return bestOffset > 0 ? rate / bestOffset : -1;
+}
+
+function draw(freq) {
+    ctx.fillStyle = "#111";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = "cyan";
+    let y = canvas.height - Math.min(freq / 5, canvas.height);
+    ctx.fillRect(pitches.length % canvas.width, y, 2, 2);
+}
+
+function check() {
+    let matches = 0;
+    for (let t of HAPPY) {
+        if (pitches.find(p => Math.abs(p - t) < 15)) matches++;
+    }
+    if (matches > HAPPY.length * 0.6) {
+        recognized = true;
+        document.getElementById("status").textContent =
+            "Happy Birthday Recognized!";
+        confetti();
+    } else {
+        pitches = [];
+    }
+}
+
+function confetti() {
+    for (let i = 0; i < 120; i++) {
+        let c = document.createElement("div");
+        c.className = "confetti";
+        c.style.left = Math.random() * 100 + "vw";
+        c.style.background =
+            `hsl(${Math.random()*360},100%,50%)`;
+        document.body.appendChild(c);
+        setTimeout(()=>c.remove(),3000);
+    }
+}
+</script>
+
+</body>
+</html>
